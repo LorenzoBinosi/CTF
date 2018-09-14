@@ -25,16 +25,15 @@ The remaining variables in the `.bss` are:
 * `count`: an signed integer variable used for addressing all of the hashes in a buffer on the stack. It is incremented every level and multiplied for 16(length of a MD5 digest) to select the address in which will be stored the current level hash.
 * `nonce`: it's the random byte which starts our string that will be hashed. It's a random value and it's not changing each level. It is placed in the input buffer on `.data` before reading the input.
 * `hmask`: mask used for show how many bytes are set to zero in the current level. Not very useful.
-
 Basically, we can change `count` and `nonce`. Incrementing the value of `count` will lead to an overwriting on part of the stack we are not interesed in. The game won't return normally, there's an alarm and so the only way to reach the return address on the stack is win the game legitly. Given that the `count` variable is signed, we can decrement it! In fact, if we overwrite the `count` variable with -1(`\xff\xff\xff\xff`), we can place the hash of the current input in the frame of a function called in the main function. The first function that will be called is the function that generates the hash and place it(using the `count` variable) in the buffer of the hash. With `count` equal to -1 this function overwrite its return address with the lowest 4 bytes of the current hash.
 
 ## Idea! 
 
 Overwrite the return address of the hash function with a choosen address, so finding a collision on the first 4 byte of the hash.
-The only address we can use is 0x00010C70 which performs:
-LDR     R0, =aBinSh     ; "/bin/sh"
-BL      system
-
+The only address we can use is 0x00010C70 which performs: <br />
+LDR     R0, =aBinSh     ; "/bin/sh" <br />
+BL      system <br />
+<br />
 N.B.: This address won't lead to any input/output operation, so it's perfect.
 
 ## String structure
@@ -178,7 +177,7 @@ while True:
         conn.close()
         continue
 ```
-
+<br />
 As you can see, there are only two values in the list because i got lucky and the `nonce` byte was 0x00 or 0x01.
-
+<br />
 `SECT{Y0U_kn0w_i7s_b@d_wHeN_cAn4R1es_n33d_C@NaRi3z}`
