@@ -177,7 +177,6 @@ while True:
         conn.close()
         continue
 ```
-<br />
 As you can see, there are only two values in the list because i got lucky and the `nonce` byte was 0x00 or 0x01.
 <br />
 `SECT{Y0U_kn0w_i7s_b@d_wHeN_cAn4R1es_n33d_C@NaRi3z}`
