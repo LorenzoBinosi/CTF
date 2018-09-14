@@ -1,6 +1,6 @@
 # Hashcash v2
 
-![Game](/images/game.png)
+![Game](images/game.png)
 
 As you can see in the image above, you are required to find a string, that starts with `nonce`, which it's MD5 hash that starts with `n` zero bytes, where `n` is the level number. At the very end (level 16) you are required to find an MD5 hash with all bytes to zero. If you find such hash, the program will do for you `system('/bin/sh')`.
 
@@ -18,7 +18,7 @@ Info about hashcashv2:
 
 I'm not an expert on crypto but for sure, there's no way to win the game legitly. Thus, i started looking for any vulnerability in the input and i find out that the input has an huge overflow in the `stdin`, `stdout` section. The memory structure of `.data` and `.bss` is the following.
 
-![Memory](/images/memory.png)
+![Memory](images/memory.png)
 
 We can overwrite until `hmask`, so changing `count`, `nonce`, `stderr`, `stdin`, `stdout` and of course `hmash`. Changing `stdin` or `stdout` will lead to a segfault when performing input/ouptut operation (print, read, ...), so one of the first things i looked for was a memory leak of the libc. Unfortunately, i didn't find anything and i thought a way to change them without trigger any input/output operation.
 The remaining variables in the `.bss` are:
