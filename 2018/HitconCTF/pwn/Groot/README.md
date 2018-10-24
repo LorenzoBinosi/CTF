@@ -96,13 +96,12 @@ makeDir     (conn, 'directory1')
 rm          (conn, 'directory1')
 ```
 
-With some `cd` of As I'm filling the chunks of file2, file3 and file4 with As. In this way, the directory will be created in the same chunk of the freed directory and again, it will have the same `head` address of the previous directory. Finally, freeing this last directory will provide us a double free and so, a list of free chunks in which we can control the pointer to the next free chunk.
+With a `cd` of As I'm filling the chunks of file2. In this way, the directory will be created in the same chunk of the freed directory and again, it will have the same `head` address of the previous directory. Finally, freeing this last directory will provide us a double free and so, a list of free chunks in which we can control the pointer to the next free chunk.
 File3, file4 and file5 has values which may be not really clear now. The name of file3 is just a pointer to the pointer of the pointer of file4, file4 name is just a pointer to the pointer of the content of file5 and file5 content is a pointer to the pointer of its content.
 
-IMMAGINE
+Imagine TODO
 
-
-Now, with some `cd` it is possible to consume the free list. With what? With a pointer to the pointer of the name of file3. In this way we will move our free list in a list already prepared with file3, file4 and file5.
+Now, with some `cd` it is possible to consume the free list. With what? With a pointer to the pointer of the name of file3. In this way we will move our free list in a fake list already prepared with file3, file4 and file5.
 
 ```python
 cdDir       (conn, p64(heap_base + OFFSET_FILENAME5))
@@ -111,7 +110,7 @@ cdDir       (conn, p64(heap_base + OFFSET_FILENAME5))
 cdDir       (conn, p64(heap_base + OFFSET_FILENAME5))
 ```
 
-After this 4 commands our free lists will point to the pointer of the name of file3. Consuming another chunk will allow us to change the pointer of the name of file3 with an arbitrary pointer and moreover, the next free chunk will be the name of file3, which is a pointer ;)
+After this 4 commands our free lists will point to the pointer of the name of file3. Consuming another chunk will allow us to change the pointer of the name of file3 with an arbitrary pointer and moreover, the next free fake chunk will be the name of file3, which is a pointer ;)
 The new value of the pointer of the name of file3 will be a pointer close to the start of the heap. Indeed, in this region, there are pointers to the `.bss` because the root structure of the system is allocated on the `.bss` and several directories(bin, etc, lib...) have, as parent, the root directory. All this stuff will lead to a leak of the ELF.
 
 ```python
