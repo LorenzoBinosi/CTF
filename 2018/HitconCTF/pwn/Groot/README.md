@@ -97,9 +97,7 @@ rm          (conn, 'directory1')
 ```
 
 With a `cd` of As I'm filling the chunks of file2. In this way, the directory will be created in the same chunk of the freed directory and again, it will have the same `head` address of the previous directory. Finally, freeing this last directory will provide us a double free and so, a list of free chunks in which we can control the pointer to the next free chunk.
-File3, file4 and file5 has values which may be not really clear now. The name of file3 is just a pointer to the pointer of the pointer of file4, file4 name is just a pointer to the pointer of the content of file5 and file5 content is a pointer to the pointer of its content.
-
-Imagine TODO
+File3, file4 and file5 has values which may be not really clear now. The name of file3 is just a pointer to the pointer of the name of file4, file4 name is just a pointer to the pointer of the content of file5 and file5 content is a pointer to the pointer of its content.
 
 Now, with some `cd` it is possible to consume the free list. With what? With a pointer to the pointer of the name of file3. In this way we will move our free list in a fake list already prepared with file3, file4 and file5.
 
