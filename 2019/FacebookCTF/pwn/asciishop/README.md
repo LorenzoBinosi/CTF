@@ -1,8 +1,8 @@
 # asciishop
 
-Past weekend Facebook CTF had a lot of funny and tricky challenges. However, most of them weren't not so hard and interesting. asciishop, instead, was a challenge that brought something that is not so usual to see in standard C/C++ Linux pwns.
+Past weekend Facebook CTF had a lot of funny and tricky challenges. However, most of them weren't not so hard and interesting. Asciishop, instead, was a challenge that brought something that is not so usual to see in standard C/C++ Linux pwns.
 
-The service is a Ascii file manager in which you can upload, download, delete and customize Ascii images of at most 1024 bytes. Each image is stored in a mmapped page and each page can store up to 16 images. The maximum number of pages is 32, so it is possibile to store up to 512 images. Ascii images have also metadata which are the following.
+The service is an Ascii file manager in which you can upload, download, delete and customize Ascii images of at most 1024 bytes. Every image is stored in a mmapped page and each page can store up to 16 images. The maximum number of pages is 32, so it is possibile to store up to 512 images. Ascii images have also the metadata which are the followings:
 
 ```C
 struct ascii_image
@@ -14,7 +14,7 @@ struct ascii_image
     char image[1024];
 };
 ```
-Moreover, an ascii image is saved as a "file" which has the following metadata.
+Moreover, an ascii image is saved as a "file" which has the following metadata:
 
 ```C
 struct ascii_file
@@ -35,7 +35,7 @@ The binary has the following security options.
 There's no canary because it's compiled with clang with the `-fsanitize=safe-stack` option. With this option each buffer on the stack will be moved in a mmapped memory region under the pages of the libc. Thus, if a buffer overflow occurs, it will overflow over the code of the libc (which is not writable) generating an exception.
 
 
-It's worth to see how it works in the only stack buffer used by the application. The add filter option read a filter of 1024 bytes which is or-ed with an uploaded image. Unfortunately this function doesn't work because a wrong return value, but still allows us to fill the buffer with a filter. The function prologue is the following.
+It's worth to see how it works in the only stack buffer used by the application. The add filter option reads a filter of 1024 bytes which is or-ed with an uploaded image. Unfortunately this function doesn't work because of a wrong return value, but still allows us to fill the buffer with a filter. The function prologue is the following.
 
 ```assembly
 sub_12d50:
@@ -50,9 +50,9 @@ sub_12d50:
         mov     [rbp+var_20], rcx
 ```
 
-`mov     rax, cs:off_21BFB8` is basically `mov     rax, [rip + 0x21BFB8]` that is a pointer to got variable called `__safestack_unsafe_stack_ptr` which value is -8 (0xFFFFFFFFFFFFFFF8). The next instruction instead, take the qword from `fs[-8]` and put it inside `rcx`. The value contained in `rcx` is the base of the libc as we said before. Then the value is copied in `rdx` and its value is deacreased of 1024 (like the stack) for the buffer of the filter. Finally, the new value of `rdx` is moved to `fs[-8]` and the old value, contained in `rcx` in saved on the stack.
+`mov     rax, cs:off_21BFB8` is basically `mov     rax, [rip + 0x21BFB8]` that is a pointer to got variable called `__safestack_unsafe_stack_ptr` which value is -8 (0xFFFFFFFFFFFFFFF8). The next instruction instead, takes the qword from `fs[-8]` and put it inside `rcx`. The value contained in `rcx` is the base of the libc as we said before. Then the value is copied in `rdx` and its value is deacreased of 1024 (like the stack) for the buffer of the filter. Finally, the new value of `rdx` is moved to `fs[-8]` and the old value, contained in `rcx` in saved on the stack.
 
-At the end of the function, the value of `fs[-8]` is restored to its old value.
+At the end of the function, the value of `fs[-8]` will be restored to its old value.
 
 ```assembly
 ...
@@ -75,7 +75,7 @@ arch_prctl(ARCH_SET_FS, 0x7f156813b180) = 0
 
 In the picture above is shown the mapping of the process along with the position of FS and the first two pages for the ascii images. As you can see the mapping is moving towards the page of FS and, if more ascii are uploaded, some pages will be allocated under the page of FS.
 
-Untill now, we didn't see anything that allow us to pwn it but something useful for what is coming now.
+Untill now, we didn't see anything that allows us to pwn it but something useful for what is coming now.
 
 ## Vulnerabilities
 
@@ -83,11 +83,11 @@ There are basically two exploitable vulnerabilities. The first one is in the che
 
 ![Vuln1](images/vuln1.png)
 
-If one of the metadata is negative, it will be negated and checked if is lower than a certain value. Howerver, it's not possible to negate the lowest value of an integer (0x80000000), because it's negated would require an extra bit. Thus, the value of the negation will result again in 0x80000000 which is again a negative number. Afterwards, we can have an image with cols and rows from 0 to 32 or 0x80000000, and an offset from 0 to 1024 or 0x80000000.
+If one of the metadata is negative, it will be negated and checked if it is lower than a certain value. Howerver, it's not possible to negate the lowest value of an integer (0x80000000), because its negated would require an extra bit. Thus, the value of the negation will result again in 0x80000000 which is again a negative number. Afterwards, we can have an image with cols and rows from 0 to 32 or 0x80000000, and an offset from 0 to 1024 or 0x80000000.
 
-The second vulnerability is in the function that show the grid of an image. If you upload two adiacents ascii images in memory, with the first one with 32 columns and a large enough offset, the grid of the first image will be the remaining content of the first image plus the content of the second image along with the metadata.
+The second vulnerability is in the function that shows the grid of an image. If you upload two adiacents ascii images in memory, with the first one with 32 columns and a large enough offset, the grid of the first image will be the remaining content of the first image plus the content of the second image along with the metadata.
 
-As you can imagine the first vulnerabilty will allows us to write somewhere and the second one to read somewhere.
+As you can imagine the first vulnerabilty will allow us to write somewhere and the second one to read somewhere.
 
 ## Exploitation
 
@@ -97,7 +97,7 @@ There's another function that allows us to change a pixel in an ascii image prov
 
 ![ChangePixel](images/change.png)
 
-Here i spent a lot of time to figure out a way to get an out of bounds write and i got it with an ascii image with cols, rows and offset equal to 0x80000000. Then, to bypass the third check i used a 0.
+Here I spent a lot of time figuring out a way to get an out-of-bounds write and I got it with an ascii image with cols, rows and offset equal to 0x80000000. Then, to bypass the third check I used a 0.
 
 ```
 0 = 0 * 0x80000000
@@ -105,13 +105,13 @@ Here i spent a lot of time to figure out a way to get an out of bounds write and
 ```
 
 Bypassing the fourth check is easy. Any number plus zero is equal to itself.
-The fifth check doesn't depend from the coordinates but from the image metadata and with the image i used is already bypassed.
+The fifth check doesn't depend from the coordinates but from the image's metadata and with the image I used is already bypassed.
 
 ```
 positive_number + 0x80000000 >= 0x80000000
 ```
 
-And the last one too given that cols * rows is a huge positive number which is truncated to 32 bit and gives 0. Thus,
+And the last one too, given that #cols * #rows is a huge positive number which is truncated to 32 bit and gives 0. Thus,
 
 ```
 positive_number + 0x80000000 < 0
@@ -119,7 +119,7 @@ positive_number + 0x80000000 < 0
 
 is always true.
 
-Moreover, the coordinate is casted to an unsigned it, so we can change any value starting from the ascii image up to the 0xFFFF-th byte.
+Moreover, the coordinate is casted to an unsigned int, so we can change any value starting from the ascii image up to the 0xFFFF-th byte of itself.
 
 ## The exploit
 
@@ -131,14 +131,14 @@ for i in range(5):
             uploadAscii(str(32 * i + j).rjust(7, '0'), image)
 ```
 
-Then, i created one image to write and one image to read. The image to write was the one with cols, rows and offset equal to 0x80000000. The image to read was a standard image.
+Then, I created one image to write and one image to read. The image to write was the one with columns, rows and offset equal to 0x80000000. The image to read was a standard image.
 
 ```python
 uploadAscii('WRITE00', image, 0x80000000, 0x80000000, 0x80000000)
 uploadAscii('READ000', image)
 ```
 
-In order to leak the libc base address i just changed the offset of the image used to read with a value that is the difference between `fs[-8]` and the address of the image used to read.
+In order to leak the libc base address, I just changed the offset of the image used to read with a value that is the difference between `fs[-8]` and the address of that image. In this way, the print grid function will print the value of `fs[-8]` in the firsts 8 bytes.
 
 ```python
 moveToAsciiShop()
@@ -160,7 +160,7 @@ print 'LIBC base: ' + hex(libc_base)
 quitTouchup()
 ```
 
-Libc leak was not enough given that i could not change the program flow with hooks. Thus, i looked around that page and found a very reliable leak of the stack. With some changes to the leak i figured out an address that if it gets decreased of 1024 it points closer to the return address of the ascii shop submenu.
+Libc leak was not enough given that I could not change the program flow with hooks. Thus, I looked around that page and found a very reliable leak of the stack. With some changes to the value of the leak I figured out an address that, if it gets decreased of 1024, it points closer to the return address of the ascii shop submenu.
 
 ```python
 touchupAscii('WRITE00')
@@ -191,7 +191,7 @@ for i in range(6):
 quitTouchup()
 ```
 
-And finally i called the filter function to ROP on the stack. The ROP used gadget from the libc to spawn `/bin/sh` with an `execve` syscall.
+And finally I called the filter function to ROP on the stack. The ROP used the gadgets from the libc to spawn `/bin/sh` with an `execve` syscall.
 
 ```python
 # ROP
@@ -216,10 +216,8 @@ Note: sometimes the leak is not reliable because non alphanumeric characters are
 
 ## Exploiting the remote server
 
-The mapping of the server was different and i figured out immediately that the page below the FS page was the first page (page in position 0). Thus, i just remove the initial part which allocates the pages.
+The mapping of the server was different and I figured out immediately that the page below the FS page was the first page (page in position 0). Thus, I just removed the initial part which allocates the pages.
 
 ## Flag
 
 `fb{s4fe_4nd_50und_fr0m_5ma5hing}`
-
-Note: i wrote it in 2 hours without reviewing it. Don't judge my english!
